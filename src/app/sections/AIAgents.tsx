@@ -41,7 +41,7 @@ export default function AIAgents() {
         delay: anime.stagger(200),
         easing: 'easeOutExpo',
         duration: 1500,
-        begin: (anim) => {
+        begin: () => {
           document.querySelectorAll('.agent-card').forEach(el => {
             (el as HTMLElement).style.opacity = '0';
           });
@@ -103,7 +103,7 @@ export default function AIAgents() {
         </div>
 
         <div className="grid md:grid-cols-3 gap-8">
-          {agentFeatures.map((feature, index) => (
+          {agentFeatures.map((feature) => (
             <motion.div
               key={feature.title}
               className="agent-card bg-white rounded-xl shadow-lg overflow-hidden"

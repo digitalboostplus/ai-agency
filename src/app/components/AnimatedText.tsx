@@ -19,7 +19,7 @@ export default function AnimatedText({ text, className = '', delay = 0 }: Animat
     elementRef.current.innerHTML = '';
 
     // Split text into characters, preserving spaces
-    const characters = text.split('').map((char, i) => {
+    const characters = text.split('').map((char) => {
       const span = document.createElement('span');
       if (char === ' ') {
         span.innerHTML = '&nbsp;';
