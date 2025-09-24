@@ -9,6 +9,7 @@ const navItems = [
   { name: 'Home', href: '/' },
   { name: 'Services', href: '/services' },
   { name: 'AI Agents', href: '/ai-agents' },
+  { name: 'GHL Research', href: '/ghl-research' },
   { name: 'Case Studies', href: '/case-studies' },
   { name: 'Contact', href: '/contact' },
 ];
