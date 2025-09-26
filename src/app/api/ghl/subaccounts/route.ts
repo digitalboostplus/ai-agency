@@ -6,12 +6,12 @@ import {
   normalizeLocation,
   sanitiseBaseUrl,
 } from '@/lib/ghl';
+import { getPrivateAccessToken, invalidatePrivateAccessToken } from '@/server/ghl/privateToken';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 
 interface ListRequestBody {
-  apiKey?: unknown;
   searchTerm?: unknown;
   limit?: unknown;
   baseUrl?: unknown;
@@ -146,16 +146,6 @@ export async function POST(req: Request) {
     );
   }
 
-  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error: 'An API key is required to query Go High Level.',
-      },
-      { status: 400 },
-    );
-  }
-
   const baseUrl = sanitiseBaseUrl(body.baseUrl);
   const limit = parseLimit(body.limit);
   const searchTerm = typeof body.searchTerm === 'string' ? body.searchTerm.trim() : '';
@@ -169,12 +159,38 @@ export async function POST(req: Request) {
   let responseText = '';
   let payload: unknown = null;
 
+  let accessToken: string;
+
   try {
-    const ghlResponse = await fetch(requestUrl.toString(), {
+    accessToken = await getPrivateAccessToken();
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Unable to obtain HighLevel access token.';
+
+    return NextResponse.json(
+      {
+        error: message,
+      },
+      { status: 500 },
+    );
+  }
+
+  const executeRequest = async (token: string) =>
+    fetch(requestUrl.toString(), {
       method: 'GET',
-      headers: buildGhlHeaders(apiKey),
+      headers: buildGhlHeaders(token),
       cache: 'no-store',
     });
+
+  try {
+    let ghlResponse = await executeRequest(accessToken);
+
+    if (ghlResponse.status === 401 || ghlResponse.status === 403) {
+      invalidatePrivateAccessToken();
+      const refreshedToken = await getPrivateAccessToken();
+      ghlResponse = await executeRequest(refreshedToken);
+    }
 
     responseText = await ghlResponse.text();
 

@@ -6,16 +6,10 @@ import {
   normalizeLocation,
   sanitiseBaseUrl,
 } from '@/lib/ghl';
+import { getPrivateAccessToken, invalidatePrivateAccessToken } from '@/server/ghl/privateToken';
 
 interface DetailRequestBody {
-  apiKey?: unknown;
   baseUrl?: unknown;
-}
-
-interface RouteParams {
-  params: {
-    locationId: string;
-  };
 }
 
 function extractLocation(payload: unknown): Record<string, unknown> | null {
@@ -52,8 +46,8 @@ function buildInsights(location: NormalizedLocation): Record<string, number> {
   return insights;
 }
 
-export async function POST(req: Request, { params }: RouteParams) {
-  const locationId = params?.locationId;
+export async function POST(req: Request, context: { params: Promise<{ locationId: string }> }) {
+  const { locationId } = await context.params;
 
   if (!locationId) {
     return NextResponse.json(
@@ -72,27 +66,42 @@ export async function POST(req: Request, { params }: RouteParams) {
     body = {};
   }
 
-  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error: 'An API key is required to query Go High Level.',
-      },
-      { status: 400 },
-    );
-  }
-
   const baseUrl = sanitiseBaseUrl(body.baseUrl);
   const detailUrl = `${baseUrl}/locations/${encodeURIComponent(locationId)}`;
 
   let payload: unknown = null;
+  let accessToken: string;
 
   try {
-    const ghlResponse = await fetch(detailUrl, {
+    accessToken = await getPrivateAccessToken();
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Unable to obtain HighLevel access token.';
+
+    return NextResponse.json(
+      {
+        error: message,
+      },
+      { status: 500 },
+    );
+  }
+
+  const executeRequest = async (token: string) =>
+    fetch(detailUrl, {
       method: 'GET',
-      headers: buildGhlHeaders(apiKey),
+      headers: buildGhlHeaders(token),
       cache: 'no-store',
     });
+
+  try {
+    let ghlResponse = await executeRequest(accessToken);
+
+    if (ghlResponse.status === 401 || ghlResponse.status === 403) {
+      invalidatePrivateAccessToken();
+      const refreshedToken = await getPrivateAccessToken();
+      ghlResponse = await executeRequest(refreshedToken);
+    }
 
     const responseText = await ghlResponse.text();
     if (responseText) {

@@ -31,7 +31,20 @@ export interface NormalizedLocation {
   raw?: Record<string, unknown>;
 }
 
-export const DEFAULT_GHL_BASE_URL = "https://rest.gohighlevel.com/v1";
+
+export interface NormalizedCustomValue {
+  id: string;
+  name?: string;
+  slug?: string;
+  value?: string;
+  type?: string;
+  group?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  raw?: Record<string, unknown>;
+}
+
+export const DEFAULT_GHL_BASE_URL = "https://services.leadconnectorhq.com";
 
 export function sanitiseBaseUrl(candidate: unknown): string {
   if (typeof candidate === "string") {
@@ -329,4 +342,114 @@ export function normalizeLocation(raw: unknown): NormalizedLocation | null {
   };
 
   return normalized;
+}
+
+
+function parseCustomValue(raw: unknown): NormalizedCustomValue | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+
+  const id =
+    getOptionalString(record.id) ??
+    getOptionalString(record._id) ??
+    getOptionalString(record.uid) ??
+    getOptionalString(record.customValueId);
+
+  if (!id) {
+    return null;
+  }
+
+  const name =
+    getOptionalString(record.name) ??
+    getOptionalString(record.title) ??
+    getOptionalString(record.label);
+
+  const slug =
+    getOptionalString(record.slug) ??
+    getOptionalString(record.key) ??
+    getOptionalString(record.apiKey);
+
+  const value =
+    getOptionalString(record.value) ??
+    getOptionalString(record.defaultValue) ??
+    getOptionalString(record.stringValue);
+
+  const type =
+    getOptionalString(record.type) ??
+    getOptionalString(record.fieldType) ??
+    getOptionalString(record.valueType);
+
+  const group =
+    getOptionalString(record.group) ??
+    getOptionalString(record.folder) ??
+    getOptionalString(record.groupName) ??
+    getOptionalString(record.collection);
+
+  const createdAt =
+    getOptionalDateString(record.createdAt) ??
+    getOptionalDateString(record.dateAdded) ??
+    getOptionalDateString(record.createdOn);
+
+  const updatedAt =
+    getOptionalDateString(record.updatedAt) ??
+    getOptionalDateString(record.dateUpdated) ??
+    getOptionalDateString(record.modifiedOn);
+
+  return {
+    id,
+    name,
+    slug,
+    value,
+    type,
+    group,
+    createdAt,
+    updatedAt,
+    raw: record,
+  };
+}
+
+export function normalizeCustomValues(payload: unknown): NormalizedCustomValue[] {
+  const results: NormalizedCustomValue[] = [];
+  const seen = new Set<string>();
+
+  const add = (candidate: unknown) => {
+    const parsed = parseCustomValue(candidate);
+    if (parsed && !seen.has(parsed.id)) {
+      seen.add(parsed.id);
+      results.push(parsed);
+    }
+  };
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      add(item);
+    }
+  } else if (isRecord(payload)) {
+    if (Array.isArray(payload.customValues)) {
+      for (const item of payload.customValues) {
+        add(item);
+      }
+    }
+
+    if (Array.isArray(payload.data)) {
+      for (const item of payload.data) {
+        add(item);
+      }
+    }
+
+    if (Array.isArray(payload.items)) {
+      for (const item of payload.items) {
+        add(item);
+      }
+    }
+
+    if (isRecord(payload.customValue)) {
+      add(payload.customValue);
+    }
+  }
+
+  return results;
 }

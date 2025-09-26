@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import Navbar from '../components/Navbar';
 import {
   DEFAULT_GHL_BASE_URL,
@@ -41,7 +42,7 @@ const LIMIT_OPTIONS = [25, 50, 100, 200, 500];
 
 function formatDate(value?: string): string {
   if (!value) {
-    return '—';
+    return '-';
   }
 
   const date = new Date(value);
@@ -128,7 +129,7 @@ function DetailField({
   value?: string | null;
   multiline?: boolean;
 }) {
-  const displayValue = value && value.trim().length > 0 ? value : '—';
+  const displayValue = value && value.trim().length > 0 ? value : '-';
 
   return (
     <div>
@@ -143,8 +144,6 @@ function DetailField({
 }
 
 export default function GoHighLevelResearchPage() {
-  const [apiKey, setApiKey] = useState('');
-  const [rememberApiKey, setRememberApiKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_GHL_BASE_URL);
   const [limit, setLimit] = useState<number>(50);
   const [searchTerm, setSearchTerm] = useState('');
@@ -162,35 +161,21 @@ export default function GoHighLevelResearchPage() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsCache, setDetailsCache] = useState<Record<string, CachedDetail>>({});
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [initialized, setInitialized] = useState(false);
+  const [autoLoaded, setAutoLoaded] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
-    }
-
-    const storedKey = window.localStorage.getItem('ghlApiKey');
-    if (storedKey) {
-      setApiKey(storedKey);
-      setRememberApiKey(true);
     }
 
     const storedBaseUrl = window.localStorage.getItem('ghlApiBaseUrl');
     if (storedBaseUrl) {
       setBaseUrl(storedBaseUrl);
     }
+
+    setInitialized(true);
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (rememberApiKey && apiKey.trim().length > 0) {
-      window.localStorage.setItem('ghlApiKey', apiKey.trim());
-    } else {
-      window.localStorage.removeItem('ghlApiKey');
-    }
-  }, [apiKey, rememberApiKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -223,70 +208,75 @@ export default function GoHighLevelResearchPage() {
     }.`;
   }, [clientFilter, filteredSubAccounts.length, subAccounts.length]);
 
-  const handleLookup = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+  const loadSubAccounts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setSubAccounts([]);
+    setMeta(null);
+    setListSource(null);
+    setSelectedId(null);
+    setSelectedDetails(null);
+    setDetailInsights(null);
+    setDetailSource(null);
+    setDetailsError(null);
+    setDetailsCache({});
+    setCopyState('idle');
 
-      const trimmedKey = apiKey.trim();
-      if (trimmedKey.length === 0) {
-        setError('Please provide a Go High Level API key.');
+    const sanitizedBaseUrl = baseUrl.trim().length > 0 ? baseUrl.trim().replace(/\/+$/, '') : DEFAULT_GHL_BASE_URL;
+    if (sanitizedBaseUrl !== baseUrl) {
+      setBaseUrl(sanitizedBaseUrl);
+    }
+
+    try {
+      const response = await fetch('/api/ghl/subaccounts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          searchTerm: searchTerm.trim(),
+          limit,
+          baseUrl: sanitizedBaseUrl,
+        }),
+      });
+
+      const payload = (await response.json()) as ListApiResponse;
+
+      if (!response.ok) {
+        setError(payload?.error ?? 'Unable to fetch sub-accounts from Go High Level.');
+        setSubAccounts([]);
         return;
       }
 
-      setLoading(true);
-      setError(null);
+      const locations = Array.isArray(payload.locations) ? payload.locations : [];
+      setSubAccounts(locations);
+      setMeta(payload.meta ?? null);
+      setListSource(payload.source ?? null);
+      setClientFilter('');
+    } catch {
+      setError('We were unable to reach the lookup service. Please try again.');
       setSubAccounts([]);
-      setMeta(null);
-      setListSource(null);
-      setSelectedId(null);
-      setSelectedDetails(null);
-      setDetailInsights(null);
-      setDetailSource(null);
-      setDetailsError(null);
-      setDetailsCache({});
-      setCopyState('idle');
+    } finally {
+      setLoading(false);
+    }
+  }, [baseUrl, limit, searchTerm]);
 
-      const sanitizedBaseUrl = baseUrl.trim().length > 0 ? baseUrl.trim().replace(/\/+$/, '') : DEFAULT_GHL_BASE_URL;
-      if (sanitizedBaseUrl !== baseUrl) {
-        setBaseUrl(sanitizedBaseUrl);
-      }
-
-      try {
-        const response = await fetch('/api/ghl/subaccounts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            apiKey: trimmedKey,
-            searchTerm: searchTerm.trim(),
-            limit,
-            baseUrl: sanitizedBaseUrl,
-          }),
-        });
-
-        const payload = (await response.json()) as ListApiResponse;
-
-        if (!response.ok) {
-          setError(payload?.error ?? 'Unable to fetch sub-accounts from Go High Level.');
-          setSubAccounts([]);
-          return;
-        }
-
-        const locations = Array.isArray(payload.locations) ? payload.locations : [];
-        setSubAccounts(locations);
-        setMeta(payload.meta ?? null);
-        setListSource(payload.source ?? null);
-        setClientFilter('');
-      } catch {
-        setError('We were unable to reach the lookup service. Please try again.');
-        setSubAccounts([]);
-      } finally {
-        setLoading(false);
-      }
+  const handleLookup = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      await loadSubAccounts();
     },
-    [apiKey, baseUrl, limit, searchTerm],
+    [loadSubAccounts],
   );
+
+  useEffect(() => {
+    if (!initialized || autoLoaded) {
+      return;
+    }
+
+    setAutoLoaded(true);
+    void loadSubAccounts();
+  }, [initialized, autoLoaded, loadSubAccounts]);
 
   const handleSelectSubAccount = useCallback(
     async (location: NormalizedLocation) => {
@@ -300,12 +290,6 @@ export default function GoHighLevelResearchPage() {
         setDetailInsights(cached.insights);
         setDetailSource(cached.source);
         setDetailsLoading(false);
-        return;
-      }
-
-      const trimmedKey = apiKey.trim();
-      if (trimmedKey.length === 0) {
-        setDetailsError('Please provide an API key to load sub-account details.');
         return;
       }
 
@@ -326,7 +310,6 @@ export default function GoHighLevelResearchPage() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            apiKey: trimmedKey,
             baseUrl: sanitizedBaseUrl,
           }),
         });
@@ -362,7 +345,7 @@ export default function GoHighLevelResearchPage() {
         setDetailsLoading(false);
       }
     },
-    [apiKey, baseUrl, detailsCache],
+    [baseUrl, detailsCache],
   );
 
   const handleCopyRaw = useCallback(async () => {
@@ -419,9 +402,10 @@ export default function GoHighLevelResearchPage() {
             Go High Level Sub-Account Research Hub
           </h1>
           <p className="max-w-3xl text-base text-slate-600 sm:text-lg">
-            Inspect sub-accounts across your agency in seconds. Authenticate with your agency API key, pull
-            live data from Go High Level, and drill into each location&apos;s contact information, timezone,
-            access list, and raw API payload for deeper investigations.
+            Inspect sub-accounts across your agency in seconds. Requests use the agency&apos;s private integration
+            credentials configured on the server, so you can pull live Go High Level data and drill into each
+            location&apos;s contact information, timezone, access list, and raw API payload for deeper
+            investigations.
           </p>
         </header>
 
@@ -432,22 +416,9 @@ export default function GoHighLevelResearchPage() {
               className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm backdrop-blur"
             >
               <div className="space-y-5">
-                <div>
-                  <label htmlFor="apiKey" className="block text-sm font-semibold text-slate-700">
-                    Go High Level API key
-                  </label>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Use an agency-level key with read access. The key is only used from your browser for live
-                    lookups and is never stored on our servers.
-                  </p>
-                  <input
-                    id="apiKey"
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder="sk_..."
-                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  />
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs text-blue-700">
+                  Requests authenticate automatically using the agency&apos;s private integration credentials.
+                  Update the base URL below if your workspace depends on the LeadConnector host.
                 </div>
 
                 <div>
@@ -500,22 +471,12 @@ export default function GoHighLevelResearchPage() {
                   </div>
                 </div>
 
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={rememberApiKey}
-                    onChange={(event) => setRememberApiKey(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  Remember API key in this browser
-                </label>
-
                 <button
                   type="submit"
                   className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:shadow-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={loading}
                 >
-                  {loading ? 'Loading sub-accounts…' : 'Load sub-accounts'}
+                  {loading ? 'Loading sub-accounts...' : 'Load sub-accounts'}
                 </button>
               </div>
             </form>
@@ -550,7 +511,7 @@ export default function GoHighLevelResearchPage() {
                     rel="noreferrer"
                     className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-600"
                   >
-                    View API request ↗
+                    View API request  URL
                   </a>
                 )}
               </div>
@@ -591,9 +552,16 @@ export default function GoHighLevelResearchPage() {
 
                         return (
                           <li key={location.id}>
-                            <button
-                              type="button"
+                            <div
+                              role="button"
+                              tabIndex={0}
                               onClick={() => handleSelectSubAccount(location)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  handleSelectSubAccount(location);
+                                }
+                              }}
                               className={`w-full rounded-2xl border px-5 py-4 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 ${
                                 isSelected
                                   ? 'border-blue-500 bg-blue-50/80 text-blue-900'
@@ -637,11 +605,11 @@ export default function GoHighLevelResearchPage() {
                               <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
                                 <div>
                                   <span className="font-medium text-slate-500">Email:</span>{' '}
-                                  {location.email ?? '—'}
+                                  {location.email ?? '-'}
                                 </div>
                                 <div>
                                   <span className="font-medium text-slate-500">Phone:</span>{' '}
-                                  {location.phone ?? '—'}
+                                  {location.phone ?? '-'}
                                 </div>
                                 <div>
                                   <span className="font-medium text-slate-500">Created:</span>{' '}
@@ -655,7 +623,16 @@ export default function GoHighLevelResearchPage() {
                                   <span className="whitespace-pre-wrap">{address}</span>
                                 </p>
                               )}
-                            </button>
+                              <div className="mt-4 flex justify-end">
+                                <Link
+                                  href={`/ghl-research/${encodeURIComponent(location.id)}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="text-sm font-semibold text-blue-600 hover:text-blue-500"
+                                >
+                                  View custom values
+                                </Link>
+                              </div>
+                            </div>
                           </li>
                         );
                       })}
@@ -698,7 +675,7 @@ export default function GoHighLevelResearchPage() {
                     rel="noreferrer"
                     className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-600"
                   >
-                    View detail request ↗
+                    View detail request  URL
                   </a>
                 )}
               </div>

@@ -6,12 +6,7 @@ import anime from 'animejs';
 import { motion } from 'framer-motion';
 
 const navItems = [
-  { name: 'Home', href: '/' },
-  { name: 'Services', href: '/services' },
-  { name: 'AI Agents', href: '/ai-agents' },
   { name: 'GHL Research', href: '/ghl-research' },
-  { name: 'Case Studies', href: '/case-studies' },
-  { name: 'Contact', href: '/contact' },
 ];
 
 export default function Navbar() {
@@ -48,7 +43,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex-shrink-0">
-            <Link href="/" className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <Link href="/ghl-research" className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               AI Agency
             </Link>
           </div>
