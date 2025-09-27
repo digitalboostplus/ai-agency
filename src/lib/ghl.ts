@@ -14,6 +14,20 @@ export interface NormalizedTeamMember {
   role?: string;
 }
 
+export interface NormalizedCustomValueFolder {
+  id?: string;
+  name?: string;
+}
+
+export interface NormalizedCustomValue {
+  id: string;
+  key?: string;
+  name?: string;
+  value?: string;
+  folder?: NormalizedCustomValueFolder;
+  raw?: Record<string, unknown>;
+}
+
 export interface NormalizedLocation {
   id: string;
   name?: string;
@@ -113,6 +127,131 @@ function collectStringArray(value: unknown): string[] | undefined {
     .filter((item): item is string => typeof item === "string" && item.length > 0);
 
   return results.length > 0 ? Array.from(new Set(results)) : undefined;
+}
+
+function resolveCustomValueFolder(raw: Record<string, unknown>): NormalizedCustomValueFolder | undefined {
+  const folderCandidates: unknown[] = [raw.folder, raw.folderInfo, raw.customValueFolder];
+
+  let folderRecord: Record<string, unknown> | undefined;
+  for (const candidate of folderCandidates) {
+    if (isRecord(candidate)) {
+      folderRecord = candidate;
+      break;
+    }
+  }
+
+  const folderId =
+    getOptionalString(raw.folderId) ??
+    getOptionalString(raw.folder_id) ??
+    (folderRecord ? getOptionalString(folderRecord.id) ?? getOptionalString(folderRecord.folderId) : undefined);
+
+  const folderName =
+    getOptionalString(raw.folderName) ??
+    getOptionalString(raw.folder) ??
+    (folderRecord
+      ? getOptionalString(folderRecord.name) ?? getOptionalString(folderRecord.title) ?? getOptionalString(folderRecord.label)
+      : undefined);
+
+  if (!folderId && !folderName) {
+    return undefined;
+  }
+
+  return {
+    id: folderId,
+    name: folderName,
+  };
+}
+
+export function normalizeCustomValue(raw: unknown): NormalizedCustomValue | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const id =
+    getOptionalString(raw.id) ??
+    getOptionalString(raw.customValueId) ??
+    getOptionalString(raw.valueId) ??
+    getOptionalString(raw._id);
+
+  if (!id) {
+    return null;
+  }
+
+  const key =
+    getOptionalString(raw.key) ??
+    getOptionalString(raw.name) ??
+    getOptionalString(raw.customValueKey) ??
+    getOptionalString(raw.fieldKey);
+
+  const name =
+    getOptionalString(raw.name) ??
+    getOptionalString(raw.label) ??
+    getOptionalString(raw.title) ??
+    getOptionalString(raw.displayName);
+
+  const value =
+    getOptionalString(raw.value) ??
+    getOptionalString(raw.defaultValue) ??
+    getOptionalString(raw.currentValue) ??
+    getOptionalString(raw.textValue);
+
+  const folder = resolveCustomValueFolder(raw);
+
+  const normalized: NormalizedCustomValue = {
+    id,
+    key,
+    name,
+    value,
+    folder,
+    raw,
+  };
+
+  return normalized;
+}
+
+export function normalizeCustomValueList(payload: unknown): NormalizedCustomValue[] {
+  const collections: unknown[] = [];
+
+  if (Array.isArray(payload)) {
+    collections.push(payload);
+  } else if (isRecord(payload)) {
+    const potentialKeys = [
+      'customValues',
+      'custom_values',
+      'customvalues',
+      'values',
+      'data',
+      'items',
+      'results',
+      'list',
+    ];
+
+    for (const key of potentialKeys) {
+      const candidate = (payload as Record<string, unknown>)[key];
+      if (Array.isArray(candidate)) {
+        collections.push(candidate);
+      }
+    }
+  }
+
+  const results: NormalizedCustomValue[] = [];
+  const seen = new Set<string>();
+
+  for (const collection of collections) {
+    if (!Array.isArray(collection)) {
+      continue;
+    }
+
+    for (const entry of collection) {
+      const normalized = normalizeCustomValue(entry);
+      if (normalized && !seen.has(normalized.id)) {
+        seen.add(normalized.id);
+        results.push(normalized);
+      }
+    }
+  }
+
+  return results;
 }
 
 function resolveAddress(raw: Record<string, unknown>): NormalizedAddress | undefined {

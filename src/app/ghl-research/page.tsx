@@ -5,6 +5,7 @@ import Navbar from '../components/Navbar';
 import {
   DEFAULT_GHL_BASE_URL,
   NormalizedAddress,
+  NormalizedCustomValue,
   NormalizedLocation,
 } from '@/lib/ghl';
 
@@ -29,6 +30,25 @@ interface DetailApiResponse {
     url: string;
   };
   error?: string;
+}
+
+interface CustomValueSource {
+  url: string;
+  fallbackUrl?: string;
+  usedFallback?: boolean;
+}
+
+interface CustomValuesApiResponse {
+  values?: NormalizedCustomValue[];
+  source?: CustomValueSource;
+  error?: string;
+}
+
+interface CustomValueState {
+  values: NormalizedCustomValue[] | null;
+  source: CustomValueSource | null;
+  loading: boolean;
+  error: string | null;
 }
 
 interface CachedDetail {
@@ -161,6 +181,7 @@ export default function GoHighLevelResearchPage() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsCache, setDetailsCache] = useState<Record<string, CachedDetail>>({});
+  const [customValueStates, setCustomValueStates] = useState<Record<string, CustomValueState>>({});
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
 
   useEffect(() => {
@@ -244,6 +265,7 @@ export default function GoHighLevelResearchPage() {
       setDetailSource(null);
       setDetailsError(null);
       setDetailsCache({});
+      setCustomValueStates({});
       setCopyState('idle');
 
       const sanitizedBaseUrl = baseUrl.trim().length > 0 ? baseUrl.trim().replace(/\/+$/, '') : DEFAULT_GHL_BASE_URL;
@@ -365,6 +387,96 @@ export default function GoHighLevelResearchPage() {
     [apiKey, baseUrl, detailsCache],
   );
 
+  const handleLoadCustomValues = useCallback(
+    async (locationId: string) => {
+      const trimmedKey = apiKey.trim();
+      if (trimmedKey.length === 0) {
+        setCustomValueStates((previous) => ({
+          ...previous,
+          [locationId]: {
+            values: previous[locationId]?.values ?? null,
+            source: previous[locationId]?.source ?? null,
+            loading: false,
+            error: 'Please provide an API key to load custom values.',
+          },
+        }));
+        return;
+      }
+
+      const sanitizedBaseUrl =
+        baseUrl.trim().length > 0 ? baseUrl.trim().replace(/\/+$/, '') : DEFAULT_GHL_BASE_URL;
+      if (sanitizedBaseUrl !== baseUrl) {
+        setBaseUrl(sanitizedBaseUrl);
+      }
+
+      setCustomValueStates((previous) => ({
+        ...previous,
+        [locationId]: {
+          values: previous[locationId]?.values ?? null,
+          source: previous[locationId]?.source ?? null,
+          loading: true,
+          error: null,
+        },
+      }));
+
+      try {
+        const response = await fetch(
+          `/api/ghl/subaccounts/${encodeURIComponent(locationId)}/custom-values`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              apiKey: trimmedKey,
+              baseUrl: sanitizedBaseUrl,
+            }),
+          },
+        );
+
+        const payload = (await response.json()) as CustomValuesApiResponse;
+
+        if (!response.ok) {
+          setCustomValueStates((previous) => ({
+            ...previous,
+            [locationId]: {
+              values: previous[locationId]?.values ?? null,
+              source: previous[locationId]?.source ?? null,
+              loading: false,
+              error: payload?.error ?? 'Unable to load custom values.',
+            },
+          }));
+          return;
+        }
+
+        const values = Array.isArray(payload.values) ? payload.values : [];
+        const source: CustomValueSource | null =
+          payload.source && typeof payload.source.url === 'string' ? payload.source : null;
+
+        setCustomValueStates((previous) => ({
+          ...previous,
+          [locationId]: {
+            values,
+            source,
+            loading: false,
+            error: null,
+          },
+        }));
+      } catch {
+        setCustomValueStates((previous) => ({
+          ...previous,
+          [locationId]: {
+            values: previous[locationId]?.values ?? null,
+            source: previous[locationId]?.source ?? null,
+            loading: false,
+            error: 'We were unable to load custom values. Please try again.',
+          },
+        }));
+      }
+    },
+    [apiKey, baseUrl],
+  );
+
   const handleCopyRaw = useCallback(async () => {
     if (!selectedDetails?.raw) {
       return;
@@ -406,6 +518,12 @@ export default function GoHighLevelResearchPage() {
       return 'Unable to format raw JSON.';
     }
   }, [selectedDetails]);
+
+  const selectedCustomValueState = selectedDetails
+    ? customValueStates[selectedDetails.id]
+    : selectedId
+    ? customValueStates[selectedId]
+    : undefined;
 
   return (
     <main className="min-h-screen bg-slate-100">
@@ -803,6 +921,108 @@ export default function GoHighLevelResearchPage() {
                         </ul>
                       </div>
                     )}
+
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h3 className="text-sm font-semibold text-slate-800">Custom values</h3>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {selectedCustomValueState?.source?.url && (
+                            <a
+                              href={selectedCustomValueState.source.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-600"
+                            >
+                              View request ↗
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleLoadCustomValues(selectedDetails.id)}
+                            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={selectedCustomValueState?.loading}
+                          >
+                            {selectedCustomValueState?.loading
+                              ? 'Loading...'
+                              : selectedCustomValueState?.values
+                              ? 'Refresh custom values'
+                              : 'Load custom values'}
+                          </button>
+                        </div>
+                      </div>
+                      {selectedCustomValueState?.source?.usedFallback && (
+                        <p className="mt-1 text-xs text-slate-500">Loaded via fallback custom-values endpoint.</p>
+                      )}
+                      {selectedCustomValueState?.error && (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-red-50/80 px-3 py-2 text-xs text-red-700">
+                          {selectedCustomValueState.error}
+                        </div>
+                      )}
+                      {selectedCustomValueState?.loading ? (
+                        <div className="mt-3 space-y-3">
+                          {Array.from({ length: 3 }).map((_, index) => (
+                            <div key={index} className="h-16 animate-pulse rounded-2xl bg-slate-100" />
+                          ))}
+                        </div>
+                      ) : selectedCustomValueState?.values ? (
+                        selectedCustomValueState.values.length > 0 ? (
+                          <ul className="mt-4 space-y-3">
+                            {selectedCustomValueState.values.map((customValue) => {
+                              const folderName = customValue.folder?.name ?? '';
+                              const folderId = customValue.folder?.id ?? '';
+                              const folderLabel = folderName
+                                ? folderId && folderId !== folderName
+                                  ? `${folderName} (${folderId})`
+                                  : folderName
+                                : folderId;
+                              const displayValue =
+                                customValue.value && customValue.value.trim().length > 0
+                                  ? customValue.value
+                                  : '—';
+
+                              return (
+                                <li
+                                  key={customValue.id}
+                                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                                >
+                                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      {customValue.name ?? customValue.key ?? customValue.id}
+                                    </p>
+                                    {customValue.key && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                        {customValue.key}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">
+                                    {displayValue}
+                                  </p>
+                                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                                      ID: {customValue.id}
+                                    </span>
+                                    {folderLabel && (
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                                        Folder: {folderLabel}
+                                      </span>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : (
+                          <p className="mt-3 text-sm text-slate-500">
+                            No custom values found for this sub-account.
+                          </p>
+                        )
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-500">
+                          Custom values haven&apos;t been loaded yet for this sub-account.
+                        </p>
+                      )}
+                    </div>
 
                     {rawJson && (
                       <div>
